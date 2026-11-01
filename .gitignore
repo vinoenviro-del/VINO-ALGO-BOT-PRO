@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.venv/
+backend/venv/
+backend/.venv/
+*.csv
+*.log
+logs/
+
+# Secrets & Sensitive Session Tokens (Alice Blue & Credentials)
+backend/access_token.json
+access_token.json
+.env
+.env.*
+*.secret
+
+# Data State
+data/daily_state.json
+
+# Node & Frontend Build Artifacts
+node_modules/
+frontend/node_modules/
+frontend/dist/
+dist/
+.npm
+.eslintcache
+
+# IDE & OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

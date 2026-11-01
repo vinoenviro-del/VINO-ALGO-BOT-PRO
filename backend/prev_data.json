@@ -1,0 +1,81 @@
+{
+  "updated_at": "2026-10-30T15:30:00",
+  "NIFTY": {
+    "prev_high": 23118.10,
+    "prev_low": 22905.10,
+    "prev_close": 23053.10,
+    "prev_open": 22964.50,
+    "today_open": 23053.10,
+    "atm_strike": 23050,
+    "prev_ce_high": 175.20,
+    "prev_ce_low": 95.00,
+    "prev_pe_high": 132.89,
+    "prev_pe_low": 85.00
+  },
+  "BANKNIFTY": {
+    "prev_high": 51950.00,
+    "prev_low": 51380.00,
+    "prev_close": 51650.00,
+    "prev_open": 51450.00,
+    "today_open": 51680.00,
+    "prev_ce_high": 340.00,
+    "prev_ce_low": 160.00,
+    "prev_pe_high": 310.00,
+    "prev_pe_low": 145.00
+  },
+  "FINNIFTY": {
+    "prev_high": 23940.00,
+    "prev_low": 23710.00,
+    "prev_close": 23820.10,
+    "prev_open": 23750.00,
+    "today_open": 23830.00,
+    "prev_ce_high": 165.00,
+    "prev_ce_low": 70.00,
+    "prev_pe_high": 150.00,
+    "prev_pe_low": 65.00
+  },
+  "SENSEX": {
+    "prev_high": 80780.00,
+    "prev_low": 80120.00,
+    "prev_close": 80425.30,
+    "prev_open": 80250.00,
+    "today_open": 80450.00,
+    "prev_ce_high": 480.00,
+    "prev_ce_low": 210.00,
+    "prev_pe_high": 440.00,
+    "prev_pe_low": 195.00
+  },
+  "BANKEX": {
+    "prev_high": 57180.00,
+    "prev_low": 56610.00,
+    "prev_close": 56890.20,
+    "prev_open": 56700.00,
+    "today_open": 56910.00,
+    "prev_ce_high": 380.00,
+    "prev_ce_low": 175.00,
+    "prev_pe_high": 350.00,
+    "prev_pe_low": 160.00
+  },
+  "RELIANCE": {
+    "prev_high": 1348.00,
+    "prev_low": 1324.50,
+    "prev_close": 1335.50,
+    "prev_open": 1328.00,
+    "today_open": 1337.00,
+    "prev_ce_high": 42.00,
+    "prev_ce_low": 18.00,
+    "prev_pe_high": 38.00,
+    "prev_pe_low": 16.00
+  },
+  "TCS": {
+    "prev_high": 4165.00,
+    "prev_low": 4095.00,
+    "prev_close": 4120.00,
+    "prev_open": 4105.00,
+    "today_open": 4125.00,
+    "prev_ce_high": 85.00,
+    "prev_ce_low": 35.00,
+    "prev_pe_high": 78.00,
+    "prev_pe_low": 30.00
+  }
+}
