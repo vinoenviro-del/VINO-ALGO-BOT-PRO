@@ -193,6 +193,10 @@ export default function Dashboard() {
   const [stockNotice, setStockNotice] = useState("");
   const searchContainerRef = useRef(null);
 
+  // Dedicated Spot & ATM states (Weekend logic reactive)
+  const [spot, setSpot] = useState(23053.10);
+  const [atm, setAtm] = useState(23050);
+
   // Bottom 4 Cards Values (Exact Screenshot Specification)
   const [marketData, setMarketData] = useState({
     spot: 23053.10,
@@ -527,6 +531,12 @@ export default function Dashboard() {
 
   const fetchNiftySpotOhlc = async () => {
     try {
+      const isWeekend = new Date().getDay() === 0 || new Date().getDay() === 6;
+      if (isWeekend) {
+        console.log("Sunday - Market closed - Showing Friday close 23053.10");
+        setSpot(23053.10);
+        setAtm(23050);
+      }
       const res = await fetch('http://127.0.0.1:8000/api/nifty/spot-ohlc');
       if (res.ok) {
         const data = await res.json();
@@ -550,20 +560,38 @@ export default function Dashboard() {
 
   const fetchLiveData = async () => {
     try {
+      const isWeekend = new Date().getDay() === 0 || new Date().getDay() === 6;
+      if (isWeekend) {
+        console.log("Sunday - Market closed - Showing Friday close 23053.10");
+        setSpot(23053.10);
+        setAtm(23050);
+      }
+
       const res = await fetch('http://127.0.0.1:8000/live_data');
       if (res.ok) {
         const data = await res.json();
-        setAlgoData(data);
-        if (data.nifty_spot) {
-          const atm = data.atm_strike || Math.round(data.nifty_spot / 50) * 50;
-          setMarketData({
-            spot: data.nifty_spot,
-            atm: atm,
-            ce_bep: data.common_bep_upper || (atm + (data.bep_val || 135.10)),
-            pe_bep: data.common_bep_lower || (atm - (data.bep_val || 135.10)),
-            status: data.signal ? data.signal.split(' - ')[0] : 'IDLE / READY'
-          });
-        }
+        const activeSpot = isWeekend ? 23053.10 : (data.nifty_spot || 23053.10);
+        const activeAtm = isWeekend ? 23050 : (data.atm_strike || Math.round(activeSpot / 50) * 50);
+
+        setSpot(activeSpot);
+        setAtm(activeAtm);
+
+        setAlgoData(prev => ({
+          ...prev,
+          ...data,
+          nifty_spot: activeSpot,
+          atm_strike: activeAtm
+        }));
+
+        setMarketData(prev => ({
+          ...prev,
+          spot: activeSpot,
+          atm: activeAtm,
+          ce_bep: data.common_bep_upper || (activeAtm + (data.bep_val || 130.10)),
+          pe_bep: data.common_bep_lower || (activeAtm - (data.bep_val || 130.10)),
+          status: data.signal ? data.signal.split(' - ')[0] : 'IDLE / READY'
+        }));
+
         if (data.common_bep_upper) {
           setCommonBep({
             ce_high: data.ce_high,
@@ -583,6 +611,13 @@ export default function Dashboard() {
   };
 
   useEffect(() => {
+    const isWeekend = new Date().getDay() === 0 || new Date().getDay() === 6;
+    if (isWeekend) {
+      console.log("Sunday - Market closed - Showing Friday close 23053.10");
+      setSpot(23053.10);
+      setAtm(23050);
+    }
+
     fetchDualMomentum();
     fetchLivePositions();
     fetchPrevDay();

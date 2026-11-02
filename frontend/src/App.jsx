@@ -22,6 +22,8 @@ const addLineSeriesCompat = (chart, opts) => {
 export default function App() {
   const [activeTab, setActiveTab] = useState('v3'); // 'v3' | 'dashboard' | 'optionchain'
   const [data, setData] = useState(null);
+  const [spot, setSpot] = useState(23053.10);
+  const [atm, setAtm] = useState(23050);
 
   // Separate refs for CE, PE, and Spot charts (Clean variable declarations)
   const ceRef = useRef(null);
@@ -33,16 +35,41 @@ export default function App() {
 
   // Fetch from YOUR backend endpoints dynamically
   useEffect(() => {
+    const isWeekend = new Date().getDay() === 0 || new Date().getDay() === 6;
+    if (isWeekend) {
+      console.log("Sunday - Market closed - Showing Friday close 23053.10");
+      setSpot(23053.10);
+      setAtm(23050);
+    }
+
     const load = async () => {
       try {
+        const isWeekendCheck = new Date().getDay() === 0 || new Date().getDay() === 6;
+        if (isWeekendCheck) {
+          console.log("Sunday - Market closed - Showing Friday close 23053.10");
+          setSpot(23053.10);
+          setAtm(23050);
+        }
+
         // First get live quote / spot OHLC to determine exact dynamic Spot & dynamic ATM strike
         const [spotOhlc, vinoHist] = await Promise.all([
           fetch(`${API}/api/nifty/spot-ohlc`).then(r => r.json()).catch(() => null),
           fetch(`${API}/api/vino/history`).then(r => r.json()).catch(() => null)
         ]);
 
-        const spotVal = spotOhlc?.spot || spotOhlc?.candles?.slice(-1)[0]?.close || 23053.10;
-        const dynamicAtm = spotOhlc?.atm || Math.round(spotVal / 50) * 50 || 23050;
+        let spotVal;
+        let dynamicAtm;
+
+        if (isWeekendCheck) {
+          spotVal = 23053.10;
+          dynamicAtm = 23050;
+        } else {
+          spotVal = spotOhlc?.spot || spotOhlc?.candles?.slice(-1)[0]?.close || 23053.10;
+          dynamicAtm = spotOhlc?.atm || Math.round(spotVal / 50) * 50 || 23050;
+        }
+
+        setSpot(spotVal);
+        setAtm(dynamicAtm);
 
         // Fetch dynamic Common BEP and dynamic Dual Momentum candles for the dynamic ATM strike
         const [commonBep, dualCandles] = await Promise.all([
