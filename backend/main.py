@@ -682,10 +682,27 @@ POPULAR_SECURITIES = [
 _quote_cache: Dict[str, Dict[str, Any]] = {}
 
 
-def fetch_live_or_cached_quote(symbol: str, exchange: str) -> Dict[str, Any]:
+def fetch_live_or_cached_quote(symbol: str, exchange: str = "NSE") -> Dict[str, Any]:
     """Retrieves live quote via Alice Blue session or returns realistic active market quote."""
     sym_upper = symbol.strip().upper()
-    exch_upper = exchange.strip().upper()
+    exch_upper = (exchange or "NSE").strip().upper()
+
+    # Normalize common index symbol aliases
+    if sym_upper in ("NIFTY 50", "NIFTY50", "NIFTY-50", "NIFTY_50"):
+        sym_upper = "NIFTY"
+    elif sym_upper in ("BANK NIFTY", "BANK-NIFTY", "BANKNIFTY", "BANK_NIFTY"):
+        sym_upper = "BANKNIFTY"
+    elif sym_upper in ("FIN NIFTY", "FIN-NIFTY", "FINNIFTY", "FIN_NIFTY"):
+        sym_upper = "FINNIFTY"
+    elif sym_upper in ("MIDCAP NIFTY", "MIDCPNIFTY", "NIFTY MIDCAP SELECT"):
+        sym_upper = "MIDCPNIFTY"
+    elif sym_upper in ("BSE SENSEX", "SENSEX", "SENSEX 50"):
+        sym_upper = "SENSEX"
+        exch_upper = "BSE"
+    elif sym_upper in ("BSE BANKEX", "BANKEX"):
+        sym_upper = "BANKEX"
+        exch_upper = "BSE"
+
     cache_key = f"{exch_upper}:{sym_upper}"
 
     # Find known security metadata if available
@@ -843,15 +860,17 @@ def search_scrip(query: str = ""):
     return matches[:10]
 
 
+@app.get("/api/quote/{symbol}")
 @app.get("/api/quote")
-def get_quote(symbol: str, exchange: str = "NSE"):
+def get_quote(symbol: str = "NIFTY", exchange: Optional[str] = None):
     """
-    GET /api/quote?symbol=RELIANCE&exchange=NSE:
+    GET /api/quote/{symbol} or GET /api/quote?symbol=RELIANCE&exchange=NSE:
     Retrieves quote for any stock or index using get_instrument_by_symbol.
     """
     if not symbol:
         raise HTTPException(status_code=400, detail="Symbol parameter is required")
-    return fetch_live_or_cached_quote(symbol, exchange)
+    exch = exchange or ("BSE" if symbol.strip().upper() in ("SENSEX", "BANKEX") else "NSE")
+    return fetch_live_or_cached_quote(symbol, exch)
 
 
 @app.get("/api/option-chain")
@@ -1466,28 +1485,32 @@ def get_vino_table():
 
 
 @app.get("/api/vino/history")
-def get_vino_history(symbol: str = "NIFTY", exchange: Optional[str] = None):
+def get_vino_history(symbol: str = "NIFTY", exchange: Optional[str] = None, atm: Optional[int] = None):
     """
-    GET /api/vino/history?symbol=NIFTY&exchange=NSE:
-    Fetches daily historical candles (prev_high, prev_low, prev_close, prev_open, today_open)
-    and previous day ATM CE/PE premium high & low from alice.get_historical or prev_data.json.
+    GET /api/vino/history:
+    Fetches daily historical candles, yesterday's CE/PE PDH/PDL, spot 5-min OHLC, and Common BEP data.
     """
     sym = symbol.strip().upper()
+    if sym in ("NIFTY 50", "NIFTY50", "NIFTY-50"):
+        sym = "NIFTY"
     data = load_prev_data(sym)
 
-    # Attempt fetching real historical daily candle via pya3 if active session
-    alice = get_alice_session()
-    if alice and hasattr(alice, "get_historical"):
-        try:
-            # Query last 2 daily candles
-            inst_info = get_token(sym, exchange, alice_instance=alice)
-            exch_code = inst_info.get("exchange", "NSE")
-            # If supported, populate live previous day candle
-        except Exception as e:
-            logger.debug(f"Historical candle notice for {sym}: {e}")
+    q = fetch_live_or_cached_quote(sym, exchange or "NSE")
+    current_spot = float(q.get("ltp") or 23053.10)
+    if atm is None or atm <= 0:
+        atm = get_dynamic_atm(current_spot)
+
+    y = get_yesterday_data(atm)
+    spot_ohlc = get_nifty_spot_ohlc()
+    bep = common_bep_engine(atm)
 
     return {
         "symbol": sym,
+        "spot": current_spot,
+        "atm": atm,
+        "yesterday": y,
+        "spot_ohlc": spot_ohlc.get("candles", []) if isinstance(spot_ohlc, dict) else spot_ohlc,
+        "bep": bep,
         **data
     }
 
@@ -1535,36 +1558,106 @@ def get_dynamic_atm(spot_price: Optional[float] = None) -> int:
 @app.get("/api/prev-day/{symbol}")
 def prev_day(symbol: str = "NIFTY"):
     """
-    Returns previous day High, Low, Close for any symbol (NIFTY index or options like NIFTY23050CE).
+    Returns previous day High, Low, Close, Open for any symbol (NIFTY index or options like NIFTY23050CE).
     """
     sym = symbol.strip().upper()
+    if sym in ("NIFTY 50", "NIFTY50", "NIFTY-50"):
+        sym = "NIFTY"
+
+    # 1. Attempt live historical daily fetch via Alice Blue
     alice = get_alice_session()
-    if alice and hasattr(alice, "get_historical"):
+    if alice and not isinstance(alice, dict) and hasattr(alice, "get_historical") and hasattr(alice, "get_instrument_by_symbol"):
         try:
-            # Query Alice Blue historical 1D candle
-            inst_info = get_token(sym, "NSE" if not any(x in sym for x in ["CE", "PE"]) else "NFO", alice_instance=alice)
+            is_idx = sym in ("NIFTY", "BANKNIFTY", "FINNIFTY", "SENSEX", "BANKEX")
+            inst = None
+            if is_idx:
+                inst = alice.get_instrument_by_symbol("NSE", "Nifty 50" if sym == "NIFTY" else sym)
+            else:
+                inst = alice.get_instrument_by_symbol("NSE" if not any(x in sym for x in ["CE", "PE"]) else "NFO", sym)
+            
+            if inst:
+                now_dt = datetime.now()
+                from_dt = now_dt - timedelta(days=5)
+                hist = alice.get_historical(inst, from_dt, now_dt, "D", indices=is_idx)
+                if hist and isinstance(hist, list) and len(hist) > 0 and "stat" not in str(hist[0]):
+                    c = hist[-2] if len(hist) >= 2 else hist[-1]
+                    h = float(c.get("high", 0))
+                    l = float(c.get("low", 0))
+                    close_p = float(c.get("close", 0))
+                    open_p = float(c.get("open", 0))
+                    chg = round(close_p - open_p, 2)
+                    chg_pct = round((chg / open_p) * 100, 2) if open_p > 0 else 0.0
+                    return {
+                        "symbol": sym,
+                        "high": h, "low": l, "open": open_p, "close": close_p,
+                        "prev_high": h, "prev_low": l, "prev_open": open_p, "prev_close": close_p,
+                        "change": chg, "change_percent": chg_pct,
+                        "source": "alice.get_historical",
+                        "is_live": True
+                    }
         except Exception as e:
             logger.debug(f"Alice Blue prev_day notice for {sym}: {e}")
-            
-    # Default / cached previous day stats (Real Friday trading session data)
-    if "CE" in sym:
-        return {"symbol": sym, "high": 175.20, "low": 95.00, "close": 145.20, "prev_high": 175.20, "prev_low": 95.00, "prev_close": 145.20}
-    elif "PE" in sym:
-        return {"symbol": sym, "high": 132.89, "low": 85.00, "close": 123.50, "prev_high": 132.89, "prev_low": 85.00, "prev_close": 123.50}
-    else:
+
+    # 2. Check prev_data.json master cache
+    cached_master = load_prev_data(sym)
+    if cached_master and "prev_high" in cached_master and sym == "NIFTY":
         return {
             "symbol": sym,
-            "high": 23118.10,
-            "low": 22905.10,
-            "open": 22964.50,
-            "close": 23053.10,
-            "prev_high": 23118.10,
-            "prev_low": 22905.10,
-            "prev_open": 22964.50,
-            "prev_close": 23053.10,
+            "high": cached_master.get("prev_high", 23118.10),
+            "low": cached_master.get("prev_low", 22905.10),
+            "open": cached_master.get("prev_open", 22964.50),
+            "close": cached_master.get("prev_close", 23053.10),
+            "prev_high": cached_master.get("prev_high", 23118.10),
+            "prev_low": cached_master.get("prev_low", 22905.10),
+            "prev_open": cached_master.get("prev_open", 22964.50),
+            "prev_close": cached_master.get("prev_close", 23053.10),
             "change": 116.35,
-            "change_percent": 0.51
+            "change_percent": 0.51,
+            "source": "prev_data.json",
+            "is_live": False
         }
+
+    # 3. Dynamic options fallback centered on ATM strike
+    if "CE" in sym or "PE" in sym:
+        import re
+        match = re.search(r'(\d{5})', sym)
+        strike_val = int(match.group(1)) if match else 23050
+        atm_val = get_dynamic_atm()
+        strike_diff = (atm_val - strike_val) if "CE" in sym else (strike_val - atm_val)
+
+        base_high = 175.20 if "CE" in sym else 132.89
+        base_low = 95.00 if "CE" in sym else 85.00
+        base_close = 145.20 if "CE" in sym else 123.50
+
+        adj = round(strike_diff * 0.45, 2)
+        h = max(10.0, round(base_high + adj, 2))
+        l = max(5.0, round(base_low + adj, 2))
+        c = max(7.0, round(base_close + adj, 2))
+
+        return {
+            "symbol": sym,
+            "high": h, "low": l, "close": c, "open": l,
+            "prev_high": h, "prev_low": l, "prev_close": c, "prev_open": l,
+            "source": "dynamic_option_model",
+            "is_live": False
+        }
+
+    # Default NIFTY fallback
+    return {
+        "symbol": sym,
+        "high": 23118.10,
+        "low": 22905.10,
+        "open": 22964.50,
+        "close": 23053.10,
+        "prev_high": 23118.10,
+        "prev_low": 22905.10,
+        "prev_open": 22964.50,
+        "prev_close": 23053.10,
+        "change": 116.35,
+        "change_percent": 0.51,
+        "source": "fallback",
+        "is_live": False
+    }
 
 
 # --- 1. YESTERDAY DATA ENGINE ---
@@ -1687,22 +1780,7 @@ def common_bep_engine(atm: Optional[int] = None):
     }
 
 
-# --- 3. FINAL API ENDPOINTS ---
-@app.get("/api/vino/history")
-def get_vino_history(atm: Optional[int] = None):
-    """
-    Returns yesterday's high/low, spot 5-min OHLC candles, and common BEP engine data.
-    """
-    if atm is None or atm <= 0:
-        atm = get_dynamic_atm()
-    y = get_yesterday_data(atm)
-    spot_ohlc = get_nifty_spot_ohlc()
-    return {
-        "atm": atm,
-        "yesterday": y,
-        "spot_ohlc": spot_ohlc.get("candles", []) if isinstance(spot_ohlc, dict) else spot_ohlc,
-        "bep": common_bep_engine(atm)
-    }
+# --- 3. FINAL API ENDPOINTS (Common BEP & Calculation Routes) ---
 
 
 @app.get("/api/vino/common-bep/{atm}")
@@ -1856,15 +1934,22 @@ def update_common_bep(ce_ltp: float, pe_ltp: float, atm_strike: Optional[int] = 
 @app.get("/live_data")
 @app.get("/api/live_data")
 @app.get("/api/live-data")
-def live_data(atm_strike: Optional[int] = None, ce_ltp: float = 145.20, pe_ltp: float = 123.50, spot: Optional[float] = None):
+def live_data(atm_strike: Optional[int] = None, ce_ltp: Optional[float] = None, pe_ltp: Optional[float] = None, spot: Optional[float] = None):
     """
-    Live Data with Dynamic Spot (23,053.10), Dynamic ATM (23,050), Breakout/Reversal Signals, and Market Maker Trap.
+    Live Data with Dynamic Spot, Dynamic ATM, Breakout/Reversal Signals, and Market Maker Trap.
     """
     if spot is None or spot <= 0:
         q = fetch_live_or_cached_quote("NIFTY", "NSE")
         spot = round(float(q.get("ltp") or 23053.10), 2)
     if atm_strike is None or atm_strike <= 0:
         atm_strike = get_dynamic_atm(spot)
+
+    # Dynamic CE / PE LTP if not provided
+    if ce_ltp is None or pe_ltp is None:
+        ce_p = prev_day(f"NIFTY{atm_strike}CE")
+        pe_p = prev_day(f"NIFTY{atm_strike}PE")
+        ce_ltp = float(ce_p.get("close", 145.20))
+        pe_ltp = float(pe_p.get("close", 123.50))
 
     final = final_algo_logic(ce_ltp, pe_ltp, spot, atm_strike)
     common_data = update_common_bep(ce_ltp, pe_ltp, atm_strike)
@@ -1998,9 +2083,11 @@ def get_dual_momentum_candles(strike: Optional[int] = None):
     ce_line = []
     pe_line = []
 
-    # Initial option prices & momentum values
-    ce_price = 140.0
-    pe_price = 155.0
+    # Initial option prices & momentum values dynamically anchored to strike
+    atm_val = get_dynamic_atm()
+    strike_diff = (atm_val - strike) if strike else 0
+    ce_price = max(25.0, round(140.0 + (strike_diff * 0.45), 2))
+    pe_price = max(25.0, round(155.0 - (strike_diff * 0.45), 2))
     mom_index = float(fetch_live_or_cached_quote("NIFTY", "NSE").get("ltp", 23053.10))
 
     markers = []
@@ -2273,23 +2360,49 @@ def get_nifty_spot_ohlc(interval: str = "5min"):
             inst = alice.get_instrument_by_symbol("NSE", "Nifty 50")
             if inst:
                 from datetime import timedelta
-                from_dt = now - timedelta(days=1)
-                nifty_data = alice.get_historical(inst, from_dt, now, "5")
-                if nifty_data and isinstance(nifty_data, list):
-                    last_c = nifty_data[-1].get("close", 23053.10)
-                    return {
-                        "status": "success",
-                        "symbol": "NIFTY",
-                        "interval": interval,
-                        "spot": last_c,
-                        "atm": get_dynamic_atm(last_c),
-                        "candles": nifty_data
-                    }
+                from_dt = now - timedelta(days=2)
+                nifty_data = alice.get_historical(inst, from_dt, now, "5", indices=True)
+                if nifty_data and isinstance(nifty_data, list) and len(nifty_data) > 0 and "stat" not in str(nifty_data[0]):
+                    formatted_candles = []
+                    for c in nifty_data:
+                        t = c.get("time") or c.get("date")
+                        if isinstance(t, str):
+                            try:
+                                t = int(datetime.fromisoformat(t).timestamp())
+                            except Exception:
+                                try:
+                                    t = int(datetime.strptime(t, "%Y-%m-%d %H:%M:%S").timestamp())
+                                except Exception:
+                                    t = int(now.timestamp())
+                        elif isinstance(t, (datetime, date)):
+                            t = int(t.timestamp())
+                        
+                        formatted_candles.append({
+                            "time": t,
+                            "open": float(c.get("open", 0)),
+                            "high": float(c.get("high", 0)),
+                            "low": float(c.get("low", 0)),
+                            "close": float(c.get("close", 0)),
+                            "volume": float(c.get("volume", 0))
+                        })
+
+                    if formatted_candles:
+                        # Sort strictly by time for lightweight-charts
+                        formatted_candles.sort(key=lambda x: x["time"])
+                        last_c = formatted_candles[-1]["close"]
+                        return {
+                            "status": "success",
+                            "symbol": "NIFTY",
+                            "interval": interval,
+                            "spot": last_c,
+                            "atm": get_dynamic_atm(last_c),
+                            "candles": formatted_candles,
+                            "is_live": True
+                        }
         except Exception as e:
             logger.debug(f"Alice Blue historical notice: {e}")
 
     # Fallback / Realistic Intraday 5-Min OHLC candles for NIFTY spot based on Friday's real trading session
-    # Open: 22,964.50 | Low: 22,905.10 | High: 23,118.10 | Close: 23,053.10
     candles = []
     price_path = [
         22964.50, 22948.20, 22925.80, 22905.10, 22920.40, 22938.60, 22955.10, 22942.30, 22965.50, 22982.20, 22998.00,
@@ -2324,14 +2437,22 @@ def get_nifty_spot_ohlc(interval: str = "5min"):
             "close": round(close_p, 2)
         })
 
-    last_spot = candles[-1]["close"] if candles else 23053.10
+    # Synchronize last candle with live quote if available
+    live_q = fetch_live_or_cached_quote("NIFTY", "NSE")
+    last_spot = float(live_q.get("ltp") or (candles[-1]["close"] if candles else 23053.10))
+    if candles:
+        candles[-1]["close"] = round(last_spot, 2)
+        candles[-1]["high"] = round(max(candles[-1]["high"], last_spot), 2)
+        candles[-1]["low"] = round(min(candles[-1]["low"], last_spot), 2)
+
     return {
         "status": "success",
         "symbol": "NIFTY",
         "interval": interval,
         "spot": last_spot,
         "atm": get_dynamic_atm(last_spot),
-        "candles": candles
+        "candles": candles,
+        "is_live": live_q.get("is_live", False)
     }
 
 
