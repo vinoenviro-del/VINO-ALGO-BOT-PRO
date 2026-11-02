@@ -304,18 +304,18 @@ export default function Dashboard() {
     { time: '15:30', ce: 0.52, pe: 0.35 }
   ]);
 
-  // Markers for CE/PE Crossovers
-  const markers = [
+  // Markers for CE/PE Crossovers (Dynamically updated from backend dual-momentum)
+  const [markers, setMarkers] = useState([
     { time: '09:21', label: 'BUY_CE', type: 'CE', index: 2, price: '145.20' },
     { time: '10:45', label: 'BUY_PE', type: 'PE', index: 8, price: '132.80' },
     { time: '13:12', label: 'BUY_CE', type: 'CE', index: 14, price: '110.00' }
-  ];
+  ]);
 
-  // 1. Previous Day High / Low
+  // 1. Previous Day High / Low (Based on Friday Real Trading Session H: 23118.10, L: 22905.10, C: 23053.10)
   const [prevDay, setPrevDay] = useState({
-    prev_high: 24610.50,
-    prev_low: 24320.10,
-    prev_close: 24480.30
+    prev_high: 23118.10,
+    prev_low: 22905.10,
+    prev_close: 23053.10
   });
 
   // ==============================================================================
@@ -326,9 +326,9 @@ export default function Dashboard() {
   // R2 = PP + (high - low), S2 = PP - (high - low)
   // R3 = high + 2*(PP - low), S3 = low - 2*(high - PP)
   // ==============================================================================
-  const yesterday_high = prevDay.prev_high || 24610.50;
-  const yesterday_low = prevDay.prev_low || 24320.10;
-  const yesterday_close = prevDay.prev_close || 24480.30;
+  const yesterday_high = prevDay.prev_high || 23118.10;
+  const yesterday_low = prevDay.prev_low || 22905.10;
+  const yesterday_close = prevDay.prev_close || 23053.10;
 
   const PP = (yesterday_high + yesterday_low + yesterday_close) / 3;
   const R1 = (2 * PP) - yesterday_low;
@@ -348,23 +348,23 @@ export default function Dashboard() {
     S3: Number(S3.toFixed(2))
   };
 
-  // 5-Min Spot Chart Data
+  // 5-Min Spot Chart Data (Friday Real Session ~23k)
   const [spotData, setSpotData] = useState([
-    { time: '09:15', spot: 24450.20 },
-    { time: '09:30', spot: 24478.40 },
-    { time: '09:45', spot: 24512.60 },
-    { time: '10:00', spot: 24535.80 },
-    { time: '10:30', spot: 24485.50 },
-    { time: '11:00', spot: 24455.10 },
-    { time: '11:30', spot: 24430.20 },
-    { time: '12:00', spot: 24475.00 },
-    { time: '12:30', spot: 24492.40 },
-    { time: '13:00', spot: 24520.10 },
-    { time: '13:30', spot: 24545.20 },
-    { time: '14:00', spot: 24510.50 },
-    { time: '14:30', spot: 24485.00 },
-    { time: '15:00', spot: 24490.10 },
-    { time: '15:30', spot: 24496.44 }
+    { time: '09:15', spot: 22964.50 },
+    { time: '09:30', spot: 22905.10 },
+    { time: '09:45', spot: 22955.10 },
+    { time: '10:00', spot: 22998.00 },
+    { time: '10:30', spot: 23028.00 },
+    { time: '11:00', spot: 23058.90 },
+    { time: '11:30', spot: 23081.60 },
+    { time: '12:00', spot: 23118.10 },
+    { time: '12:30', spot: 23102.20 },
+    { time: '13:00', spot: 23090.80 },
+    { time: '13:30', spot: 23070.10 },
+    { time: '14:00', spot: 23062.40 },
+    { time: '14:30', spot: 23058.20 },
+    { time: '15:00', spot: 23060.00 },
+    { time: '15:30', spot: 23053.10 }
   ]);
 
   // 5-Min Spot Candlestick OHLC Data (Lightweight Charts)
@@ -438,6 +438,16 @@ export default function Dashboard() {
             ce: pt.ce_mom,
             pe: pt.pe_mom
           })));
+
+          if (data.markers && Array.isArray(data.markers)) {
+            setMarkers(data.markers.map((m, idx) => {
+              const foundIdx = data.series.findIndex(pt => pt.time === m.time);
+              return {
+                ...m,
+                index: foundIdx !== -1 ? foundIdx : (idx === 0 ? 2 : idx === 1 ? 8 : 14)
+              };
+            }));
+          }
         }
       }
     } catch (e) {}
@@ -582,6 +592,7 @@ export default function Dashboard() {
     fetchLiveData();
 
     const interval = setInterval(() => {
+      fetchDualMomentum();
       fetchLivePositions();
       fetchNiftySpotOhlc();
       fetchDualMomentumCandles();
@@ -687,9 +698,11 @@ export default function Dashboard() {
   const cePoints = momentumData.map((d, i) => `${getX(i, momentumData.length)},${getY(d.ce)}`).join(' ');
   const pePoints = momentumData.map((d, i) => `${getX(i, momentumData.length)},${getY(d.pe)}`).join(' ');
 
-  // Dynamic BEP Channel Levels for display on chart & header
-  const dynamicCeBep = Math.round(commonBep?.common_bep_upper || algoData?.breakout_upper || dualCandleData?.bep?.ce_bep || (algoData?.atm_strike ? algoData.atm_strike + 130.10 : 23130.10));
-  const dynamicPeBep = Math.round(commonBep?.common_bep_lower || algoData?.breakout_lower || dualCandleData?.bep?.pe_bep || (algoData?.atm_strike ? algoData.atm_strike - 130.10 : 22869.90));
+  // Dynamic BEP Channel Levels for display on chart & header strictly anchored to current ATM & calculated BEP
+  const currentAtm = Number(algoData?.atm_strike || marketData?.atm || Math.round((marketData?.spot || 23053.10) / 50) * 50 || 23050);
+  const currentBepVal = Number(algoData?.single_common_value || commonBep?.bep_val || 130.10);
+  const dynamicCeBep = Math.round(Number(commonBep?.common_bep_upper || algoData?.breakout_upper || (currentAtm + currentBepVal)));
+  const dynamicPeBep = Math.round(Number(commonBep?.common_bep_lower || algoData?.breakout_lower || (currentAtm - currentBepVal)));
 
   return (
     <div className="w-full space-y-2 font-sans text-xs">
@@ -1015,85 +1028,101 @@ export default function Dashboard() {
               </div>
             </div>
 
-            <div className={`w-full relative select-none ${expandedCard === 'OVERVIEW_DUAL' ? 'flex-1 min-h-[500px]' : 'h-[145px]'}`}>
-              <svg 
-                viewBox={`0 0 ${chartW} ${chartH}`} 
-                className="w-full h-full overflow-visible"
-                preserveAspectRatio="none"
-              >
-                <defs>
-                  <linearGradient id="ceGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#22c55e" stopOpacity="0.22" />
-                    <stop offset="100%" stopColor="#22c55e" stopOpacity="0.0" />
-                  </linearGradient>
-                  <linearGradient id="peGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#ef4444" stopOpacity="0.18" />
-                    <stop offset="100%" stopColor="#ef4444" stopOpacity="0.0" />
-                  </linearGradient>
-                </defs>
-
-                {/* Pivot Horizontal Grid Lines */}
-                <line x1={paddingX} y1={getY(0.70)} x2={chartW - paddingX} y2={getY(0.70)} stroke="#334155" strokeWidth="0.8" strokeDasharray="2,2" />
-                <text x={paddingX - 4} y={getY(0.70) + 3} textAnchor="end" fill="#64748b" fontSize="8" fontFamily="monospace">R1</text>
-
-                <line x1={paddingX} y1={getY(0.48)} x2={chartW - paddingX} y2={getY(0.48)} stroke="#334155" strokeWidth="0.8" />
-                <text x={paddingX - 4} y={getY(0.48) + 3} textAnchor="end" fill="#64748b" fontSize="8" fontFamily="monospace">P</text>
-
-                <line x1={paddingX} y1={getY(0.25)} x2={chartW - paddingX} y2={getY(0.25)} stroke="#334155" strokeWidth="0.8" strokeDasharray="2,2" />
-                <text x={paddingX - 4} y={getY(0.25) + 3} textAnchor="end" fill="#64748b" fontSize="8" fontFamily="monospace">S1</text>
-
-                {/* BEP Channel Lines */}
-                <line x1={paddingX} y1={getY(0.66)} x2={chartW - paddingX} y2={getY(0.66)} stroke="#eab308" strokeWidth="1.1" strokeDasharray="4,3" />
-                <text x={chartW - paddingX + 4} y={getY(0.66) + 3} fill="#eab308" fontSize="8" fontFamily="monospace">CE BEP ({dynamicCeBep.toLocaleString('en-IN')})</text>
-
-                <line x1={paddingX} y1={getY(0.33)} x2={chartW - paddingX} y2={getY(0.33)} stroke="#f97316" strokeWidth="1.1" strokeDasharray="4,3" />
-                <text x={chartW - paddingX + 4} y={getY(0.33) + 3} fill="#f97316" fontSize="8" fontFamily="monospace">PE BEP ({dynamicPeBep.toLocaleString('en-IN')})</text>
-
-                {/* CE & PE Area Fills */}
-                <polygon 
-                  points={`${getX(0, momentumData.length)},${chartH - paddingY} ${cePoints} ${getX(momentumData.length - 1, momentumData.length)},${chartH - paddingY}`}
-                  fill="url(#ceGrad)" 
+            {expandedCard === 'OVERVIEW_DUAL' ? (
+              <div className="w-full flex-1 min-h-[520px] mt-2">
+                <DualMomentumCandleChart 
+                  dualData={dualCandleData || {
+                    strike: currentAtm,
+                    bep: { ce_bep: dynamicCeBep, pe_bep: dynamicPeBep },
+                    pivots: pivot,
+                    markers: markers
+                  }}
+                  isMaximized={true}
+                  onToggleMaximize={() => setExpandedCard(null)}
+                  height={540}
                 />
-                <polygon 
-                  points={`${getX(0, momentumData.length)},${chartH - paddingY} ${pePoints} ${getX(momentumData.length - 1, momentumData.length)},${chartH - paddingY}`}
-                  fill="url(#peGrad)" 
-                />
+              </div>
+            ) : (
+              <div className="w-full relative select-none h-[145px]">
+                <svg 
+                  viewBox={`0 0 ${chartW} ${chartH}`} 
+                  className="w-full h-full overflow-visible"
+                  preserveAspectRatio="none"
+                >
+                  <defs>
+                    <linearGradient id="ceGrad" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#22c55e" stopOpacity="0.22" />
+                      <stop offset="100%" stopColor="#22c55e" stopOpacity="0.0" />
+                    </linearGradient>
+                    <linearGradient id="peGrad" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#ef4444" stopOpacity="0.18" />
+                      <stop offset="100%" stopColor="#ef4444" stopOpacity="0.0" />
+                    </linearGradient>
+                  </defs>
 
-                {/* CE Momentum Line */}
-                <polyline fill="none" stroke="#22c55e" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" points={cePoints} />
+                  {/* Pivot Horizontal Grid Lines */}
+                  <line x1={paddingX} y1={getY(0.70)} x2={chartW - paddingX} y2={getY(0.70)} stroke="#334155" strokeWidth="0.8" strokeDasharray="2,2" />
+                  <text x={paddingX - 4} y={getY(0.70) + 3} textAnchor="end" fill="#64748b" fontSize="8" fontFamily="monospace">R1</text>
 
-                {/* PE Momentum Line */}
-                <polyline fill="none" stroke="#ef4444" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" points={pePoints} />
+                  <line x1={paddingX} y1={getY(0.48)} x2={chartW - paddingX} y2={getY(0.48)} stroke="#334155" strokeWidth="0.8" />
+                  <text x={paddingX - 4} y={getY(0.48) + 3} textAnchor="end" fill="#64748b" fontSize="8" fontFamily="monospace">P</text>
 
-                {/* CE/PE Cross Markers */}
-                {markers.map((m, idx) => {
-                  const xPos = getX(m.index, momentumData.length);
-                  const isCe = m.type === 'CE';
-                  const badgeColor = isCe ? '#22c55e' : '#ef4444';
-                  return (
-                    <g key={idx}>
-                      <line x1={xPos} y1={paddingY} x2={xPos} y2={chartH - paddingY} stroke={badgeColor} strokeWidth="1.1" strokeDasharray="2,2" />
-                      <rect x={xPos - 22} y={paddingY - 13} width="44" height="13" rx="2.5" fill={isCe ? '#14532d' : '#7f1d1d'} stroke={badgeColor} strokeWidth="0.8" />
-                      <text x={xPos} y={paddingY - 3.5} textAnchor="middle" fill="#ffffff" fontSize="8" fontWeight="bold" fontFamily="monospace">
-                        {m.label}
+                  <line x1={paddingX} y1={getY(0.25)} x2={chartW - paddingX} y2={getY(0.25)} stroke="#334155" strokeWidth="0.8" strokeDasharray="2,2" />
+                  <text x={paddingX - 4} y={getY(0.25) + 3} textAnchor="end" fill="#64748b" fontSize="8" fontFamily="monospace">S1</text>
+
+                  {/* BEP Channel Lines */}
+                  <line x1={paddingX} y1={getY(0.66)} x2={chartW - paddingX} y2={getY(0.66)} stroke="#eab308" strokeWidth="1.1" strokeDasharray="4,3" />
+                  <text x={chartW - paddingX + 4} y={getY(0.66) + 3} fill="#eab308" fontSize="8" fontFamily="monospace">CE BEP ({dynamicCeBep.toLocaleString('en-IN')})</text>
+
+                  <line x1={paddingX} y1={getY(0.33)} x2={chartW - paddingX} y2={getY(0.33)} stroke="#f97316" strokeWidth="1.1" strokeDasharray="4,3" />
+                  <text x={chartW - paddingX + 4} y={getY(0.33) + 3} fill="#f97316" fontSize="8" fontFamily="monospace">PE BEP ({dynamicPeBep.toLocaleString('en-IN')})</text>
+
+                  {/* CE & PE Area Fills */}
+                  <polygon 
+                    points={`${getX(0, momentumData.length)},${chartH - paddingY} ${cePoints} ${getX(momentumData.length - 1, momentumData.length)},${chartH - paddingY}`}
+                    fill="url(#ceGrad)" 
+                  />
+                  <polygon 
+                    points={`${getX(0, momentumData.length)},${chartH - paddingY} ${pePoints} ${getX(momentumData.length - 1, momentumData.length)},${chartH - paddingY}`}
+                    fill="url(#peGrad)" 
+                  />
+
+                  {/* CE Momentum Line */}
+                  <polyline fill="none" stroke="#22c55e" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" points={cePoints} />
+
+                  {/* PE Momentum Line */}
+                  <polyline fill="none" stroke="#ef4444" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" points={pePoints} />
+
+                  {/* CE/PE Cross Markers */}
+                  {markers.map((m, idx) => {
+                    const xPos = getX(m.index, momentumData.length);
+                    const isCe = m.type === 'CE';
+                    const badgeColor = isCe ? '#22c55e' : '#ef4444';
+                    return (
+                      <g key={idx}>
+                        <line x1={xPos} y1={paddingY} x2={xPos} y2={chartH - paddingY} stroke={badgeColor} strokeWidth="1.1" strokeDasharray="2,2" />
+                        <rect x={xPos - 22} y={paddingY - 13} width="44" height="13" rx="2.5" fill={isCe ? '#14532d' : '#7f1d1d'} stroke={badgeColor} strokeWidth="0.8" />
+                        <text x={xPos} y={paddingY - 3.5} textAnchor="middle" fill="#ffffff" fontSize="8" fontWeight="bold" fontFamily="monospace">
+                          {m.label}
+                        </text>
+                        <circle cx={xPos} cy={getY(isCe ? momentumData[m.index].ce : momentumData[m.index].pe)} r="3" fill={badgeColor} stroke="#ffffff" strokeWidth="1" />
+                      </g>
+                    );
+                  })}
+
+                  {/* X-Axis Time Labels */}
+                  {['09:15', '10:00', '10:45', '11:30', '12:30', '13:15', '14:30', '15:30'].map((timeLabel, idx) => {
+                    const foundIdx = momentumData.findIndex(d => d.time === timeLabel);
+                    const x = foundIdx !== -1 ? getX(foundIdx, momentumData.length) : (paddingX + idx * 95);
+                    return (
+                      <text key={idx} x={x} y={chartH - 2} textAnchor="middle" fill="#94a3b8" fontSize="8" fontFamily="monospace">
+                        {timeLabel}
                       </text>
-                      <circle cx={xPos} cy={getY(isCe ? momentumData[m.index].ce : momentumData[m.index].pe)} r="3" fill={badgeColor} stroke="#ffffff" strokeWidth="1" />
-                    </g>
-                  );
-                })}
-
-                {/* X-Axis Time Labels */}
-                {['09:15', '10:00', '10:45', '11:30', '12:30', '13:15', '14:30', '15:30'].map((timeLabel, idx) => {
-                  const foundIdx = momentumData.findIndex(d => d.time === timeLabel);
-                  const x = foundIdx !== -1 ? getX(foundIdx, momentumData.length) : (paddingX + idx * 95);
-                  return (
-                    <text key={idx} x={x} y={chartH - 2} textAnchor="middle" fill="#94a3b8" fontSize="8" fontFamily="monospace">
-                      {timeLabel}
-                    </text>
-                  );
-                })}
-              </svg>
-            </div>
+                    );
+                  })}
+                </svg>
+              </div>
+            )}
           </div>
 
           {/* Yesterday NIFTY Backtest Card */}

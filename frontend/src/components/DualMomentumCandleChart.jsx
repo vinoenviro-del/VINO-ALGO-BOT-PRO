@@ -229,7 +229,7 @@ export default function DualMomentumCandleChart({
             DUAL MOMENTUM CANDLESTICK (5-MIN)
           </h3>
           <span className="text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-2 py-0.5 rounded font-mono font-bold">
-            ATM STRIKE: {dualData?.strike || 24500}
+            ATM STRIKE: {dualData?.strike || strike || 23050}
           </span>
           {isMaximized && (
             <span className="text-[10px] bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 px-2 py-0.5 rounded font-mono font-bold animate-pulse">
